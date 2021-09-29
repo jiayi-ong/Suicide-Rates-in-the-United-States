@@ -1,8 +1,10 @@
 # Suicide-Rates-in-the-United-States
 Submitted for the STEM Fellowship Undergraduate Big Data Challenge 2020
+
 Entered top 15 finalist teams of 179 participating groups
 
 View for more info: https://stemfellowship.org/2020-undergraduate-big-data-challenge/
+
 Finalists info: https://stemfellowship.org/2020-undergraduate-big-data-day-finalists/
 
 ### Abstract
