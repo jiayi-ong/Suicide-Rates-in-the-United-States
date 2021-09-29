@@ -1,0 +1,621 @@
+---
+title: ""
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+https://mran.microsoft.com/snapshot/2017-04-22/web/packages/sjPlot/vignettes/sjplmer.html
+https://cran.r-project.org/web/packages/glmmTMB/vignettes/model_evaluation.pdf
+https://bbolker.github.io/mixedmodels-misc/ecostats_chap.html
+
+
+## __________PREPARATION__________
+
+```{r, message = FALSE, include = FALSE}
+library(ggplot2)
+library(tidyverse)
+library(stats4)
+library(forecast)
+library(car)
+library(glmmTMB)
+library(lmtest)
+library(psych)
+library(xtable)
+```
+
+```{r, message = FALSE, include = FALSE}
+setwd("C:/Users/mushj/Desktop/STUDY/Co-Cirricular/COMP - Undergraduate Big Data Challenge 2020")
+data = read_csv("Main Data.csv")
+```
+
+### Data subsetting and cleaning
+
+```{r}
+colnames(data)
+```
+
+```{r, include = FALSE}
+data = data %>%
+  #Renaming variables for ease of reference
+  rename(Suicide = `Suicide Rate`, 
+         HeartDeath = `Diseases of heart`, 
+         CerebroDeath = `Cerebrovascular diseases`, 
+         MalNeoplasmDeath = `Malignant neoplasms`,
+         RespDeath = `Chronic lower respiratory diseases`, 
+         FluPneuDeath = `Influenza and pneumonia`, 
+         LiverDeath = `Chronic liver disease and cirrhosis`, 
+         DiabDeath = `Diabetes mellitus`, 
+         HIVDeath = `Human immunodeficiency virus (HIV) disease`,
+         HomicideDeath = Homicide,
+         AlcoholDeath = `Alcohol-induced Deaths`, 
+         DrugDeath = `Drug overdose death rate`, 
+         Salary = `Median Annual Earnings`,
+         Poverty = `Percentage Below Poverty`, 
+         Bankruptcy = `Non-Business Bankruptcy Filings`, 
+         Uncertainty = `Economic Policy Uncertainty Index`, 
+         Unemployment = `Unemployment Rate`,
+         Firearms = `NICS Background Check`)
+```
+
+```{r}
+data = na.omit(data)
+```
+
+```{r}
+#Converting data units
+data$Salary = as.numeric(data$Salary/1000)
+data$Bankruptcy = as.numeric(data$Bankruptcy/1000)
+```
+
+```{r}
+colnames(data)
+```
+
+
+
+## __________FIRST MODEL FIT__________
+
+
+### Model Specification
+
+$$
+\begin{align}
+\text{Let } Y_{trg} &= \text{Number of suicide cases in year } t, \text{ from the race group } r, \text{ and gender group } g. \\[20pt]
+Y_{trg}|U_t &\sim Bin(N_{trg},P_{trg}), \\[5pt]
+&\text{ where } N_{trg} = \text{ population size of that group in that year} \\[5pt]
+&\text{ and } P_{trg} = \text{proportion of that population who committed suicide.} \\[20pt]
+\text{Estimate } &P_{trg} \text{ using a logistic link, with employment-race interaction and year random effects:} \\[5pt]
+\log \left( \frac{P_{trg}}{1-P_{trg}} \right) &= Gender_g + DrugDeath_{trg} + AlcoholDeath_{trg} \\[5pt]
+& + Salary_{trg} + (Race_r:Salary_{trg}) + Unemployment_{trg} + (Race_r:Unemployment_{trg}) + U_t \\[5pt]
+&\space \text{where }U_t \sim N(0,\sigma_t^2)
+\end{align}
+$$
+
+* Interaction term captures any heterogenous impacts of unemployment and salary on suicide rates by race (answers the question "is an ethnic group more mentally vulnerable to shocks in unemployment or salary?")
+
+* Year random effects captures any residual shocks or effects not explained by covariates within a year (i.e. year 2008 should have a higher shock on suicide rate)
+
+
+### Model Estimation, Results, and Interpretation
+
+```{r}
+#Formatting response matrix for glmm model
+#col1 = positive cases, col2 = negative cases (normalized out of 1,000,000)
+y = cbind(data$Suicide*10, 1000000-data$Suicide*10)
+
+#Relevelling factors so that baseline group refers to white males
+data$Race = relevel(as.factor(data$Race), ref = "White")
+data$Gender = relevel(as.factor(data$Gender), ref = "Male")
+```
+
+```{r}
+model = glmmTMB(y ~ Gender + AlcoholDeath + DrugDeath + 
+                  FluPneuDeath + LiverDeath +
+                  Unemployment:Race + Salary:Race + Poverty + Uncertainty +
+                  (1|Year),
+               data=data, family=binomial(link='logit'))
+
+summary(model)
+```
+
+```{r}
+stars = c("***", "***", "***", "", "***", "", "***", "", ".", "", ".", "*", "*", "***", "**", "***")
+```
+
+```{r}
+#Exponentiating estimates
+n = nrow(confint(model, level = 0.95))
+est = round(exp(confint(model, level = 0.95))[1:(n-1), ], 5)
+est = cbind(est, stars)
+
+rownames(est) = rownames(coef(summary(model))$cond)
+colnames(est) = c("2.5%", "97.5%", "Estimate", "")
+est
+```
+
+```{r}
+#Applying inverse logit function to
+#find estimated baseline rate
+as.numeric(est[1,3])/(1+as.numeric(est[1,3]))*100000
+```
+
+
+### Random Effects
+
+```{r}
+re = lme4::formatVC(summary(model)$varcor$cond)
+re
+```
+
+```{r}
+exp(as.numeric(re[,3]))
+```
+
+```{r}
+ranef(model,condVar=TRUE)$cond$Year
+```
+
+
+```{r}
+baseline = exp(model$fit$par[1] + ranef(model,condVar=TRUE)$cond$Year)/
+  (1+exp(model$fit$par[1] + ranef(model,condVar=TRUE)$cond$Year))*100000
+year = 2002:2017
+```
+
+```{r}
+base = baseline$`(Intercept)`
+plot(x = year, y = base, type = "l",
+     main = "Year Random Effect on Baseline Suicide Rate", xlab = "Year", ylab = "Suicides per 100k",
+     axes = FALSE)
+axis(1, at = 2002:2017, las = 2)
+abline(h = seq(round(min(y),2),round(max(y),2), by = 0.2), v = seq(2002, 2017, by =1), col = "GREY", lty = "dotted")
+legend("topleft", legend = c(paste("Values at", round(min(base),5)), "Differences by year too small to discern."), cex = 0.7)
+```
+
+* Can see that suicide rates due to random shocks is somewhat increasing after 2008, albeit at a very small difference
+
+
+### AIC
+
+k = log(nrow(data)) for BIC
+```{r}
+step(model)
+```
+
+
+
+### Likelihood Ratio Tests
+
+```{r}
+norandeffects = glmmTMB(y ~ Gender + AlcoholDeath + DrugDeath + 
+                  FluPneuDeath + LiverDeath +
+                  Unemployment:Race + Salary:Race + Poverty + Uncertainty,
+               data=data, family=binomial(link='logit'))
+  
+minAIC = glmmTMB(y ~ Gender + AlcoholDeath +  FluPneuDeath + Poverty + Uncertainty + 
+                   Unemployment:Race + Salary:Race + (1|Year),
+               data=data, family=binomial(link='logit'))
+model2 = minAIC
+```
+
+```{r}
+summary(model2)
+```
+
+```{r}
+stars = c("***", "***", "***", "***", "***", ".", "*", "", "*", "*",  "*", "***", "***", "***")
+```
+
+```{r}
+#Exponentiating estimates
+n = nrow(confint(model2, level = 0.95))
+est = round(exp(confint(model2, level = 0.95))[1:(n-1), ], 5)
+est = cbind(est, stars)
+
+rownames(est) = rownames(coef(summary(model2))$cond)
+colnames(est) = c("2.5%", "97.5%", "Estimate", "")
+est
+```
+
+```{r}
+AIC(model)
+AIC(model2)
+```
+
+```{r}
+lmtest::lrtest(model, minAIC)
+```
+
+```{r}
+lmtest::lrtest(model, norandeffects)
+```
+
+
+
+
+
+## __________CONTINUOUS YEAR VARIABLE__________
+
+
+```{r}
+data$Year = data$Year - 2002
+data$Year2 = data$Year^2
+data$Year3 = data$Year^3
+```
+
+```{r}
+model2 = glm(y ~ Year + Gender + AlcoholDeath + DrugDeath + 
+                  FluPneuDeath + LiverDeath +
+                  Unemployment:Race + Salary:Race + Poverty + Uncertainty,
+               data=data, family=binomial(link='logit'))
+```
+
+```{r}
+step(model2)
+```
+
+### Likelihood Ratio Tests
+
+```{r}
+minAIC = glm(y ~ Year + Gender + AlcoholDeath + Poverty +
+                   Unemployment:Race + Salary:Race,
+               data=data, family=binomial(link='logit'))
+```
+
+```{r}
+AIC(model2)
+AIC(minAIC)
+```
+
+```{r}
+lmtest::lrtest(model2, minAIC)
+```
+
+
+```{r}
+model2 = minAIC
+summary(model2)
+```
+
+```{r}
+stars = c("***", "***", "***", "***", "***", "**", "", "**", "**", "**", "***", "***", "***")
+```
+
+```{r}
+#Exponentiating estimates
+n = nrow(confint(model2))
+est = cbind(exp(confint(model2, level = 0.95))[1:(n), ], exp(coef(summary(model2)))[,1])
+est = round(est, 5)
+est = cbind(est, stars)
+
+rownames(est) = c(rownames(coef(summary(model2))))
+colnames(est) = c("2.5%", "97.5%", "Estimate", "")
+est
+```
+
+```{r}
+#Applying inverse logit function to
+#find estimated baseline probability
+odds = as.numeric(est[1,3])
+odds/(1+odds)*100000
+```
+
+
+
+
+
+
+## __________MODEL TESTS/DIAGNOSTICS__________
+
+
+### Residual Analysis
+
+```{r}
+#Standardizing residuals
+sresiduals1 = residuals(model)/sd(residuals(model))
+m = mean(sresiduals1)
+sd = sd(sresiduals1)
+
+sresiduals2 = residuals(model2)/sd(residuals(model2))
+m2 = mean(sresiduals2)
+sd2 = sd(sresiduals2)
+```
+
+```{r}
+par(mfrow=c(1,2))
+plot(sresiduals1, main = "Initial Model",
+     ylab = "Standardized Residuals", pch = 20)
+abline(h = m, col = "BLUE")
+abline(h = m+2*sd, col = "BLUE")
+abline(h = m-2*sd, col = "BLUE")
+
+plot(sresiduals2, main = "Adjusted Model",
+     ylab = "Standardized Residuals", pch = 20)
+abline(h = m2, col = "BLUE")
+abline(h = m2+2*sd2, col = "BLUE")
+abline(h = m2-2*sd2, col = "BLUE")
+```
+
+png("GLMM - Residual QQ.png", units="in", width=7, height=5, res=1080)
+dev.off()
+```{r}
+par(mfrow=c(1,2))
+#Checking residual normality
+qqPlot(residuals(model), "norm", id = FALSE, pch = 20, col = "RED", cex = 0.8,
+       xlab = "Theoretical Normal Quantiles", ylab = "Standardized Residuals",
+       main = "Initial Model")
+
+qqPlot(residuals(model2), "norm", id = FALSE, pch = 20, col = "RED", cex = 0.8,
+       xlab = "Theoretical Normal Quantiles", ylab = "Standardized Residuals",
+       main = "Adjusted Model")
+```
+
+
+
+
+## __________PREDICTION: SALARY__________
+
+```{r}
+Year = 2017
+AlcoholDeath_mean = mean(data$AlcoholDeath)
+FluPneuDeath_mean = mean(data$FluPneuDeath)
+Poverty_mean = mean(data$Poverty)
+Uncertainty_mean = mean(data$Uncertainty)
+Unemployment_mean = mean(data$Unemployment)
+Gender = "Male"
+
+test_range = 0:100
+sample_max1 = max(data$Salary[data$Race == "White"])
+sample_max2 = max(data$Salary[data$Race == "Black"])
+sample_max3 = max(data$Salary[data$Race == "Asian or Pacific Islander"])
+sample_max4 = max(data$Salary[data$Race == "Hispanic or Latino"])
+sample_min1 = min(data$Salary[data$Race == "White"])
+sample_min2 = min(data$Salary[data$Race == "Black"])
+sample_min3 = min(data$Salary[data$Race == "Asian or Pacific Islander"])
+sample_min4 = min(data$Salary[data$Race == "Hispanic or Latino"])
+```
+
+```{r}
+toPredict = expand.grid(
+  Year = Year, Race = c("White"), Gender = Gender, AlcoholDeath = AlcoholDeath_mean,
+  FluPneuDeath = FluPneuDeath_mean, Salary = test_range, Poverty = Poverty_mean, Uncertainty = Uncertainty_mean,
+  Unemployment = Unemployment_mean
+)
+
+predict = predict(model2, toPredict, se.fit=TRUE, allow.new.levels=TRUE)
+v1 = exp(predict$fit)/(1+exp(predict$fit))*100000
+upp1 = exp(predict$fit+2*predict$se.fit)/(1+exp(predict$fit+2*predict$se.fit))*100000
+low1 = exp(predict$fit-2*predict$se.fit)/(1+exp(predict$fit-2*predict$se.fit))*100000
+
+
+toPredict = expand.grid(
+  Year = Year, Race = c("Black"), Gender = Gender, AlcoholDeath = AlcoholDeath_mean,
+  FluPneuDeath = FluPneuDeath_mean, Salary = test_range, Poverty = Poverty_mean, Uncertainty = Uncertainty_mean,
+  Unemployment = Unemployment_mean
+)
+
+predict = predict(model2, toPredict, se.fit=TRUE, allow.new.levels=TRUE)
+v2 = exp(predict$fit)/(1+exp(predict$fit))*100000
+upp2 = exp(predict$fit+2*predict$se.fit)/(1+exp(predict$fit+2*predict$se.fit))*100000
+low2 = exp(predict$fit-2*predict$se.fit)/(1+exp(predict$fit-2*predict$se.fit))*100000
+
+
+toPredict = expand.grid(
+  Year = Year, Race = c("Asian or Pacific Islander"), Gender = Gender, AlcoholDeath = AlcoholDeath_mean,
+  FluPneuDeath = FluPneuDeath_mean, Salary = test_range, Poverty = Poverty_mean, Uncertainty = Uncertainty_mean,
+  Unemployment = Unemployment_mean
+)
+
+predict = predict(model2, toPredict, se.fit=TRUE, allow.new.levels=TRUE)
+v3 = exp(predict$fit)/(1+exp(predict$fit))*100000
+upp3 = exp(predict$fit+2*predict$se.fit)/(1+exp(predict$fit+2*predict$se.fit))*100000
+low3 = exp(predict$fit-2*predict$se.fit)/(1+exp(predict$fit-2*predict$se.fit))*100000
+
+
+toPredict = expand.grid(
+  Year = Year, Race = c("Hispanic or Latino"), Gender = Gender, AlcoholDeath = AlcoholDeath_mean,
+  FluPneuDeath = FluPneuDeath_mean, Salary = test_range, Poverty = Poverty_mean, Uncertainty = Uncertainty_mean,
+  Unemployment = Unemployment_mean
+)
+
+predict = predict(model2, toPredict, se.fit=TRUE, allow.new.levels=TRUE)
+v4 = exp(predict$fit)/(1+exp(predict$fit))*100000
+upp4 = exp(predict$fit+2*predict$se.fit)/(1+exp(predict$fit+2*predict$se.fit))*100000
+low4 = exp(predict$fit-2*predict$se.fit)/(1+exp(predict$fit-2*predict$se.fit))*100000
+```
+
+png("GLMM - Prediction on Salary 1.png", units="in", width=7, height=5, res=1080)
+dev.off()
+```{r}
+leg_x = 42; leg_y = 40; xlabs = "Median Annual Salary (thousands)"
+x_range = c(25,70); y_range = c(0,40); cex = 0.7; lwd = 2
+
+
+par(mfrow=c(1,2))
+
+plot(v1, type = "l", main = paste("White ",Gender), 
+     ylab = "Suicides per 100k", xlab = xlabs,
+     ylim = y_range, xlim = x_range, lwd = lwd)
+lines(upp1, lty = "dashed", col = "RED", lwd = lwd)
+lines(low1, lty = "dashed", col = "RED", lwd = lwd)
+grid()
+abline(v = sample_max1, lty = "dashed", col = "BLUE")
+abline(v = sample_min1, lty = "dashed", col = "BLUE")
+legend(x = leg_x, y = leg_y, legend = c("Point Prediction", "95% PI", "Sample Min/Max"), 
+       lty = c(1, 2, 2), col = c("BLACK", "RED", "BLUE"), cex = cex)
+
+plot(v2, type = "l", main = paste("Black ",Gender), 
+     ylab = "Suicides per 100k", xlab = xlabs,
+     ylim = y_range, xlim = x_range, lwd = lwd)
+lines(upp2, lty = "dashed", col = "RED", lwd = lwd)
+lines(low2, lty = "dashed", col = "RED", lwd = lwd)
+grid()
+abline(v = sample_max2, lty = "dashed", col = "BLUE")
+abline(v = sample_min2, lty = "dashed", col = "BLUE")
+legend(x = leg_x, y = leg_y, legend = c("Point Prediction", "95% PI", "Sample Min/Max"), 
+       lty = c(1, 2, 2), col = c("BLACK", "RED", "BLUE"), cex = cex)
+
+
+
+par(mfrow=c(1,2))
+plot(v3, type = "l", main = paste("Asian",Gender), 
+     ylab = "Suicides per 100k", xlab = xlabs,
+     ylim = y_range, xlim = x_range, lwd = lwd)
+lines(upp3, lty = "dashed", col = "RED", lwd = lwd)
+lines(low3, lty = "dashed", col = "RED", lwd = lwd)
+grid()
+abline(v = sample_max3, lty = "dashed", col = "BLUE")
+abline(v = sample_min3, lty = "dashed", col = "BLUE")
+legend(x = leg_x, y = leg_y, legend = c("Point Prediction", "95% PI", "Sample Min/Max"), 
+       lty = c(1, 2, 2), col = c("BLACK", "RED", "BLUE"), cex = cex)
+
+plot(v4, type = "l", main = paste("Hispanic/Latino", Gender), 
+     ylab = "Suicides per 100k", xlab = xlabs,
+     ylim = y_range, xlim = x_range, lwd = lwd)
+lines(upp4, lty = "dashed", col = "RED", lwd = lwd)
+lines(low4, lty = "dashed", col = "RED", lwd = lwd)
+grid()
+abline(v = sample_max4, lty = "dashed", col = "BLUE")
+abline(v = sample_min4, lty = "dashed", col = "BLUE")
+legend(x = leg_x, y = leg_y, legend = c("Point Prediction", "95% PI", "Sample Min/Max"), 
+       lty = c(1, 2, 2), col = c("BLACK", "RED", "BLUE"), cex = cex)
+
+```
+
+
+
+
+
+
+## __________PREDICTION: Unemployment__________
+
+```{r}
+AlcoholDeath_mean = mean(data$AlcoholDeath)
+FluPneuDeath_mean = mean(data$FluPneuDeath)
+Poverty_mean = mean(data$Poverty)
+Uncertainty_mean = mean(data$Uncertainty)
+Salary_mean = mean(data$Salary)
+Gender = "Male"
+
+test_range = 0:100
+sample_max1 = max(data$Unemployment[data$Race == "White"])
+sample_max2 = max(data$Unemployment[data$Race == "Black"])
+sample_max3 = max(data$Unemployment[data$Race == "Asian or Pacific Islander"])
+sample_max4 = max(data$Unemployment[data$Race == "Hispanic or Latino"])
+sample_min1 = min(data$Unemployment[data$Race == "White"])
+sample_min2 = min(data$Unemployment[data$Race == "Black"])
+sample_min3 = min(data$Unemployment[data$Race == "Asian or Pacific Islander"])
+sample_min4 = min(data$Unemployment[data$Race == "Hispanic or Latino"])
+```
+
+```{r}
+toPredict = expand.grid(
+  Year = c(2020), Race = c("White"), Gender = Gender, AlcoholDeath = AlcoholDeath_mean,
+  FluPneuDeath = FluPneuDeath_mean, Salary = Salary_mean, Poverty = Poverty_mean, Uncertainty = Uncertainty_mean,
+  Unemployment = test_range
+)
+
+predict = predict(model2, toPredict, se.fit=TRUE, allow.new.levels=TRUE)
+v1 = exp(predict$fit)/(1+exp(predict$fit))*100000
+upp1 = exp(predict$fit+2*predict$se.fit)/(1+exp(predict$fit+2*predict$se.fit))*100000
+low1 = exp(predict$fit-2*predict$se.fit)/(1+exp(predict$fit-2*predict$se.fit))*100000
+
+
+toPredict = expand.grid(
+  Year = c(2020), Race = c("Black"), Gender = Gender, AlcoholDeath = AlcoholDeath_mean,
+  FluPneuDeath = FluPneuDeath_mean, Salary = Salary_mean, Poverty = Poverty_mean, Uncertainty = Uncertainty_mean,
+  Unemployment = test_range
+)
+
+predict = predict(model2, toPredict, se.fit=TRUE, allow.new.levels=TRUE)
+v2 = exp(predict$fit)/(1+exp(predict$fit))*100000
+upp2 = exp(predict$fit+2*predict$se.fit)/(1+exp(predict$fit+2*predict$se.fit))*100000
+low2 = exp(predict$fit-2*predict$se.fit)/(1+exp(predict$fit-2*predict$se.fit))*100000
+
+
+toPredict = expand.grid(
+  Year = c(2020), Race = c("Asian or Pacific Islander"), Gender = Gender, AlcoholDeath = AlcoholDeath_mean,
+  FluPneuDeath = FluPneuDeath_mean, Salary = Salary_mean, Poverty = Poverty_mean, Uncertainty = Uncertainty_mean,
+  Unemployment = test_range
+)
+
+predict = predict(model2, toPredict, se.fit=TRUE, allow.new.levels=TRUE)
+v3 = exp(predict$fit)/(1+exp(predict$fit))*100000
+upp3 = exp(predict$fit+2*predict$se.fit)/(1+exp(predict$fit+2*predict$se.fit))*100000
+low3 = exp(predict$fit-2*predict$se.fit)/(1+exp(predict$fit-2*predict$se.fit))*100000
+
+
+toPredict = expand.grid(
+  Year = c(2020), Race = c("Hispanic or Latino"), Gender = Gender, AlcoholDeath = AlcoholDeath_mean,
+  FluPneuDeath = FluPneuDeath_mean, Salary = Salary_mean, Poverty = Poverty_mean, Uncertainty = Uncertainty_mean,
+  Unemployment = test_range
+)
+
+predict = predict(model2, toPredict, se.fit=TRUE, allow.new.levels=TRUE)
+v4 = exp(predict$fit)/(1+exp(predict$fit))*100000
+upp4 = exp(predict$fit+2*predict$se.fit)/(1+exp(predict$fit+2*predict$se.fit))*100000
+low4 = exp(predict$fit-2*predict$se.fit)/(1+exp(predict$fit-2*predict$se.fit))*100000
+```
+
+png("GLMM - Prediction on Unemployment 1.png", units="in", width=7, height=5, res=1080)
+dev.off()
+```{r}
+leg_x = 10; leg_y = 40; xlabs = "Unemployment Rate (%)"; ylabs = "Suicides per 100k";
+x_range = c(0,25); y_range = c(0,40); cex = 0.7; lwd = 2
+
+
+par(mfrow=c(1,2))
+
+plot(v1, type = "l", main = paste("White ",Gender), 
+     ylab = ylabs, xlab = xlabs,
+     ylim = y_range, xlim = x_range, lwd = lwd)
+lines(upp1, lty = "dashed", col = "RED", lwd = lwd)
+lines(low1, lty = "dashed", col = "RED", lwd = lwd)
+grid()
+abline(v = sample_max1, lty = "dashed", col = "BLUE")
+abline(v = sample_min1, lty = "dashed", col = "BLUE")
+legend(x = leg_x, y = leg_y, legend = c("Point Prediction", "95% PI", "Sample Min/Max"), 
+       lty = c(1, 2, 2), col = c("BLACK", "RED", "BLUE"), cex = cex)
+
+plot(v2, type = "l", main = paste("Black ",Gender), 
+     ylab = ylabs, xlab = xlabs,
+     ylim = y_range, xlim = x_range, lwd = lwd)
+lines(upp2, lty = "dashed", col = "RED", lwd = lwd)
+lines(low2, lty = "dashed", col = "RED", lwd = lwd)
+grid()
+abline(v = sample_max2, lty = "dashed", col = "BLUE")
+abline(v = sample_min2, lty = "dashed", col = "BLUE")
+legend(x = leg_x, y = leg_y, legend = c("Point Prediction", "95% PI", "Sample Min/Max"), 
+       lty = c(1, 2, 2), col = c("BLACK", "RED", "BLUE"), cex = cex)
+
+
+
+par(mfrow=c(1,2))
+plot(v3, type = "l", main = paste("Asian",Gender), 
+     ylab = ylabs, xlab = xlabs,
+     ylim = y_range, xlim = x_range, lwd = lwd)
+lines(upp3, lty = "dashed", col = "RED", lwd = lwd)
+lines(low3, lty = "dashed", col = "RED", lwd = lwd)
+grid()
+abline(v = sample_max3, lty = "dashed", col = "BLUE")
+abline(v = sample_min3, lty = "dashed", col = "BLUE")
+legend(x = leg_x, y = leg_y, legend = c("Point Prediction", "95% PI", "Sample Min/Max"), 
+       lty = c(1, 2, 2), col = c("BLACK", "RED", "BLUE"), cex = cex)
+
+plot(v4, type = "l", main = paste("Hispanic/Latino", Gender), 
+     ylab = ylabs, xlab = xlabs,
+     ylim = y_range, xlim = x_range, lwd = lwd)
+lines(upp4, lty = "dashed", col = "RED", lwd = lwd)
+lines(low4, lty = "dashed", col = "RED", lwd = lwd)
+grid()
+abline(v = sample_max4, lty = "dashed", col = "BLUE")
+abline(v = sample_min4, lty = "dashed", col = "BLUE")
+legend(x = leg_x, y = leg_y, legend = c("Point Prediction", "95% PI", "Sample Min/Max"), 
+       lty = c(1, 2, 2), col = c("BLACK", "RED", "BLUE"), cex = cex)
+
+```
+
+
+
+
