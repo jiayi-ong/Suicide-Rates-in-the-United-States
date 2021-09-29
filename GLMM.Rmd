@@ -5,6 +5,7 @@ output:
   html_notebook: default
 ---
 
+References:
 https://mran.microsoft.com/snapshot/2017-04-22/web/packages/sjPlot/vignettes/sjplmer.html
 https://cran.r-project.org/web/packages/glmmTMB/vignettes/model_evaluation.pdf
 https://bbolker.github.io/mixedmodels-misc/ecostats_chap.html
@@ -79,6 +80,7 @@ colnames(data)
 
 ### Model Specification
 
+Latex Description of Model
 $$
 \begin{align}
 \text{Let } Y_{trg} &= \text{Number of suicide cases in year } t, \text{ from the race group } r, \text{ and gender group } g. \\[20pt]
@@ -119,6 +121,7 @@ model = glmmTMB(y ~ Gender + AlcoholDeath + DrugDeath +
 summary(model)
 ```
 
+### Creating results table
 ```{r}
 stars = c("***", "***", "***", "", "***", "", "***", "", ".", "", ".", "*", "*", "***", "**", "***")
 ```
