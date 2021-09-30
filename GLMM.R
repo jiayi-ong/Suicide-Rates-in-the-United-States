@@ -1,11 +1,11 @@
 ---
-title: ""
+title: Generalized Linear Mixed Model""
 output:
   pdf_document: default
   html_notebook: default
 ---
 
-References:
+## References:
 https://mran.microsoft.com/snapshot/2017-04-22/web/packages/sjPlot/vignettes/sjplmer.html
 https://cran.r-project.org/web/packages/glmmTMB/vignettes/model_evaluation.pdf
 https://bbolker.github.io/mixedmodels-misc/ecostats_chap.html
@@ -29,6 +29,7 @@ library(xtable)
 setwd("C:/Users/mushj/Desktop/STUDY/Co-Cirricular/COMP - Undergraduate Big Data Challenge 2020")
 data = read_csv("Main Data.csv")
 ```
+
 
 ### Data subsetting and cleaning
 
@@ -64,7 +65,7 @@ data = na.omit(data)
 ```
 
 ```{r}
-#Converting data units
+#C onverting data units
 data$Salary = as.numeric(data$Salary/1000)
 data$Bankruptcy = as.numeric(data$Bankruptcy/1000)
 ```
@@ -75,29 +76,8 @@ colnames(data)
 
 
 
+
 ## __________FIRST MODEL FIT__________
-
-
-### Model Specification
-
-Latex Description of Model
-$$
-\begin{align}
-\text{Let } Y_{trg} &= \text{Number of suicide cases in year } t, \text{ from the race group } r, \text{ and gender group } g. \\[20pt]
-Y_{trg}|U_t &\sim Bin(N_{trg},P_{trg}), \\[5pt]
-&\text{ where } N_{trg} = \text{ population size of that group in that year} \\[5pt]
-&\text{ and } P_{trg} = \text{proportion of that population who committed suicide.} \\[20pt]
-\text{Estimate } &P_{trg} \text{ using a logistic link, with employment-race interaction and year random effects:} \\[5pt]
-\log \left( \frac{P_{trg}}{1-P_{trg}} \right) &= Gender_g + DrugDeath_{trg} + AlcoholDeath_{trg} \\[5pt]
-& + Salary_{trg} + (Race_r:Salary_{trg}) + Unemployment_{trg} + (Race_r:Unemployment_{trg}) + U_t \\[5pt]
-&\space \text{where }U_t \sim N(0,\sigma_t^2)
-\end{align}
-$$
-
-* Interaction term captures any heterogenous impacts of unemployment and salary on suicide rates by race (answers the question "is an ethnic group more mentally vulnerable to shocks in unemployment or salary?")
-
-* Year random effects captures any residual shocks or effects not explained by covariates within a year (i.e. year 2008 should have a higher shock on suicide rate)
-
 
 ### Model Estimation, Results, and Interpretation
 
