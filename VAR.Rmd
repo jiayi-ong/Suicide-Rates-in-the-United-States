@@ -1,0 +1,519 @@
+---
+title: "Vector Autoregression"
+output: rmarkdown::github_document
+---
+
+## __________PREPARATION__________
+
+```{r, message = FALSE, include = FALSE}
+library(astsa)
+library(car)
+library(fGarch)
+library(forecast)
+library(stats4)
+library(tidyverse)
+library(tseries)
+library(vars)
+```
+
+```{r, message = FALSE, include = FALSE}
+setwd("C:/Users/mushj/Desktop/WORK/Co-Cirricular/COMP - Undergraduate Big Data Challenge 2020")
+data = read_csv("Time Series Data (Weekly).csv")
+```
+
+```{r}
+data = na.omit(data)
+nrow(data)
+```
+
+```{r}
+tail(data)
+```
+
+```{r}
+load =
+  data[c(8,9,10,11,12,3,4)] %>%
+  rename(PneuDeath = `Percent of Deaths due to Pneumonia`,
+         FluDeath = `Percent of Deaths due to Influenza`,
+         Uncertainty = `Economic Policy Uncertainty Index`,
+         InsurUnemploy = `Insured Unemployment Rate`,
+         Deposits = `Savings Deposits at Commercial Banks`,
+         Firearms = `NICS Firearms Background Check`)
+```
+
+```{r, warning=F}
+seriesA = ts(load, start = c(2013,40), frequency = 52)
+seriesB = ts(load[,c("PneuDeath", "FluDeath")], 
+            start = c(2013,40), frequency = 52)
+```
+
+```{r}
+colnames(load)
+```
+
+Creating dataset with lagged values of Pneumonia and Flu Deaths
+```{r}
+series = ts.intersect(seriesA, stats::lag(seriesB, -1),
+                               stats::lag(seriesB, -2))
+colnames(series) = c("Uncertainty", "VIX", "InsurUnemploy", "Deposits", "Firearms", "PneuDeath", "FluDeath",
+                     "PneuDeath.l1", "FluDeath.l1", "PneuDeath.l2", "FluDeath.l2")
+```
+
+```{r}
+colnames(series)
+```
+
+Defining endogeneous and exogenous regressors
+```{r}
+ext = cbind(exogeneous = series[, c(6:11)])
+series = series[,c(1:5)]
+```
+
+
+
+## __________Algorithmic selection of VAR__________
+
+```{r, eval=FALSE}
+#__________Generating combinations for endogenous variables
+#Initializing list to store unique combinations
+p = list()
+#Generating the sample space of all possible combinations
+n = ncol(series)
+m = expand.grid(rep(list(1:n),n), KEEP.OUT.ATTRS = T)
+m = t(apply(as.data.frame(m), 1, sort))
+m = distinct(as.data.frame(m))
+
+#Obtaining unique values
+for (i in 1:nrow(m)){
+  p[[i]] = (unique(as.numeric(m[i,])))
+}
+
+#Removing duplicates and single value
+p = p[!duplicated(p)]
+#stores index of list elements to be removed
+remove = vector()
+#for each element in list, check if length is 1  
+for (i in 1:length(p)){
+  
+  if (length(p[i][[1]]) == 1){
+    remove = append(remove, i)
+  }
+}
+p = p[-c(remove)]
+
+#__________Generating combinations for exogenous variables
+#Initializing list to store unique combinations
+q = list()
+#Generating the sample space of all possible combinations
+n = ncol(ext)
+m = expand.grid(rep(list(1:n),n), KEEP.OUT.ATTRS = T)
+m = t(apply(as.data.frame(m), 1, sort))
+m = distinct(as.data.frame(m))
+
+#Obtaining unique values
+for (i in 1:nrow(m)){
+  q[[i]] = (unique(as.numeric(m[i,])))
+}
+
+#Removing duplicates and single value
+q = q[!duplicated(q)]
+#stores index of list elements to be removed
+remove = vector()
+#for each element in list, check if length is 1  
+for (i in 1:length(q)){
+  
+  if (length(q[i][[1]]) == 1){
+    remove = append(remove, i)
+  }
+}
+q = q[-c(remove)]
+
+#initializing vectors to store values
+aic = vector()
+eigen = vector()
+mape1s = vector()
+mape3s = vector()
+end_combo = vector()
+ext_combo = vector()
+
+#for each combination
+for (i in 1:length(p)){
+  
+  vardata = series[,c(p[i][[1]])] #select VAR data
+  
+  for (j in 1:length(q)){
+    
+    #select combination of external regressors
+    ext_sub = ext[,c(q[j][[1]])] ###plus 2 here
+    
+    #use function to find min AIC lag
+    varselec = VARselect(vardata, lag.max = 10, season = 52, exogen = ext_sub, type = "both")
+    
+    #extract AIC
+    minaic = varselec$criteria[,ncol(varselec$criteria)][1]
+    #extract min AIC lag
+    selec = varselec$selection
+    
+    #estimate VAR with min AIC lag
+    varmod = VAR(vardata, p=selec["AIC(n)"], type = "both", exogen = ext_sub)
+    
+    #computing MAPE for Uncertainty
+    if (is.element(1, c(p[i][[1]]))){
+      
+      y = tail(varmod$y[,"Uncertainty"], nrow(varmod$y)-as.numeric(selec["AIC(n)"]))
+      r = residuals(varmod)[,"Uncertainty"]
+      mape1 = mean(abs((r/y)))*100
+      
+    }else{
+      mape1 = 0
+    }
+    
+    #computing MAPE for InsurUnemploy
+    if (is.element(3, c(p[i][[1]]))){
+      
+      y = tail(varmod$y[,"InsurUnemploy"], nrow(varmod$y)-as.numeric(selec["AIC(n)"]))
+      r = residuals(varmod)[,"InsurUnemploy"]
+      mape3 = mean(abs((r/y)))*100
+      
+    }else{
+      mape3 = 0
+    }
+    
+    #extract largest characteristic polynomial root
+    maxroot = max(summary(varmod)$roots)
+    
+    #storing extracted values to vectors
+    aic =  append(aic, minaic)
+    eigen = append(eigen, maxroot)
+    mape1s = append(mape1s, mape1)
+    mape3s = append(mape3s, mape3)
+    end_combo = append(end_combo, paste(as.character(p[i][[1]]), collapse = "-"))
+    ext_combo = append(ext_combo, paste(c(as.character(q[j][[1]])), collapse = "-"))
+    ###paste(c(1,2,as.character(q[j][[1]]+2))
+  }
+}
+
+out = as.data.frame(eigen)
+out = cbind(end_combo, ext_combo, out, aic, mape1s, mape3s)
+
+saveRDS(out, "combinations.Rds")
+```
+
+```{r}
+out = readRDS("combinations.Rds")
+```
+
+```{r}
+#Filtering stationary models
+out = out[out$eigen < 1,]
+
+#Displaying subset of stationary models
+test = str_split(out$end_combo, "-")
+criteria = c(3) #has to contain all elements in criteria
+
+index = vector()
+#Store row numbers that match criteria
+for (i in 1:length(str_split(out$end_combo, "-"))){
+  
+  if (is.element(criteria, c(test[i][[1]]))){
+    
+    index = append(index, i)
+    
+  }
+}
+
+display = out[index,]
+display[order(display[,"end_combo"], display[,"aic"]),]
+```
+
+
+
+## __________VAR__________
+
+```{r}
+t(as.matrix(colnames(series)))
+t(as.matrix(colnames(ext)))
+```
+
+```{r}
+var_data = series[,c("Uncertainty", "InsurUnemploy")]
+
+varsel = VARselect(var_data, lag.max = 10, season = 52, exogen = ext[,c(1,2)])
+sel = varsel$selection
+sel
+
+var = VAR(var_data, p=sel["AIC(n)"], type = "both", exogen = ext[,c(1,2)])
+summary(var)
+```
+
+
+
+## __________COINTEGRATING VECTORS__________
+
+png("VAR - Cross-Correlation Plots of Variables.png", units="in", width=7, height=5, res=1080)
+dev.off()
+```{r}
+acf(var_data, lag.max = 52)
+```
+
+
+```{r}
+out.coint = ca.jo(var_data, ecdet = c("const"), K=10, season = 12, dumvar = ext[,c(1,2)])
+summary(out.coint)
+```
+
+r = 0: test statistic greater than value at 1pct so reject null-hypothesis of r = 0 (or no cointegration) against r != 0 at the 1% level.
+
+r <= 1: test stat smaller than value at 10pct so do not reject null-hypothesis of r <= 1 against r > 1 at the 1% level.
+
+This means there is one cointegrating vector.
+
+
+## __________GRANGER CAUSALITY__________
+
+```{r}
+vars::causality(var, cause = c("Uncertainty"))$Granger
+vars::causality(var, cause = c("InsurUnemploy"))$Granger
+```
+
+
+
+## __________IMPULSE RESPONSE_________
+
+```{r, warning = F}
+irf = vars::irf(var, ortho = F, n.ahead = 52)
+```
+
+png("VAR - Impulse Response Uncertainty on InsurUnemploy.png", units="in", width=7, height=5, res=1080)
+dev.off()
+```{r}
+lwd = 1.5
+plot(irf$irf$Uncertainty[,"InsurUnemploy"], type = "l", ylim = c(-0.002, 0.008),
+     ylab = "Insured Unemployment Rate", main = "Impulse response of Uncertainty on InsurUnemploy",
+     xlab = "Weeks", lwd = lwd)
+lines(irf$Lower$Uncertainty[,"InsurUnemploy"], lty = "dashed", col = "RED", lwd = lwd)
+lines(irf$Upper$Uncertainty[,"InsurUnemploy"], lty = "dashed", col = "RED", lwd = lwd)
+grid()
+abline(h=0)
+```
+
+
+png("VAR - Impulse Response InsurUnemploy on Itself.png", units="in", width=7, height=5, res=1080)
+dev.off()
+```{r}
+lwd = 1.5
+plot(irf$irf$InsurUnemploy[,"InsurUnemploy"], type = "l", ylim = c(-0.5, 1.3),
+     ylab = "Insured Unemployment Rate (%)", main = "Impulse response of Insured Unemployment on Itself",
+     xlab = "Weeks", lwd = lwd)
+lines(irf$Lower$InsurUnemploy[,"InsurUnemploy"], lty = "dashed", col = "RED", lwd = lwd)
+lines(irf$Upper$InsurUnemploy[,"InsurUnemploy"], lty = "dashed", col = "RED", lwd = lwd)
+grid()
+abline(h=0)
+
+legend(x = 28, y = 1.3, c("Point Estimate", "95% CI (Bootstrap method)"), 
+       col = c("BLACK", "RED"), lty = c(1,3), lwd = 2)
+```
+
+png("VAR - Impulse Response InsurUnemploy on Uncertainty.png", units="in", width=7, height=5, res=1080)
+dev.off()
+```{r}
+lwd = 1.5
+plot(irf$irf$InsurUnemploy[,"Uncertainty"], type = "l", ylim = c(-35, 45),
+     ylab = "Economic Policy Uncertainty Index", main = "Impulse response of InsurUnemploy on UncerIndex",
+     xlab = "Weeks", lwd = lwd)
+lines(irf$Lower$InsurUnemploy[,"Uncertainty"], lty = "dashed", col = "RED", lwd = lwd)
+lines(irf$Upper$InsurUnemploy[,"Uncertainty"], lty = "dashed", col = "RED", lwd = lwd)
+grid()
+abline(h=0)
+```
+
+
+
+## __________DIAGNOSTICS_________
+
+```{r}
+r = residuals(var)
+r1 = r[,"Uncertainty"]
+r2 = r[,"InsurUnemploy"]
+
+mean1 = mean(r1); sd1 = sd(r1)
+mean2 = mean(r2); sd2 = sd(r2)
+```
+
+png("VAR - Impulse Response InsurUnemploy on Uncertainty.png", units="in", width=7, height=5, res=1080)
+dev.off()
+```{r}
+par(mfrow=c(2,2))
+plot(r1, type = "l", main = "Uncertainty", col = "DARKBLUE")
+abline(h = mean1); abline(h = mean1 + 2*sd1, lty = "dashed"); abline(h = mean1 - 2*sd1, lty = "dashed")
+
+plot(r2, type = "l", main = "InsurUnemploy", col = "DARKBLUE")
+abline(h = mean2); abline(h = mean2 + 2*sd2, lty = "dashed"); abline(h = mean2 - 2*sd2, lty = "dashed")
+
+plot(data$`Economic Policy Uncertainty Index`, type = "l")
+
+plot(data$`Insured Unemployment Rate`, type = "l")
+```
+
+```{r}
+k = 2
+a = as.numeric(names(r1[r1 > (mean1 + k*sd1) | r1 < (mean1 - k*sd1)]))
+b = as.numeric(names(r2[r2 > (mean2 + k*sd2) | r2 < (mean2 - k*sd2)]))
+
+cbind(data[a,1:2], r1[a])
+cbind(data[b,1:2], r2[b])
+```
+
+
+png("VAR - Cross-Correlation Plots of Residuals.png", units="in", width=7, height=5, res=1080)
+dev.off()
+```{r}
+acf(r)
+```
+
+```{r}
+pacf(r)
+```
+
+```{r}
+par(mfrow=c(1,2))
+qqPlot(r1, id = F, main = "Uncertainty")
+qqPlot(r2, id = F, main = "InsurUnemploy")
+```
+
+```{r}
+y1 = tail(var$y[,"Uncertainty"], nrow(var$y)-10)
+y2 = tail(var$y[,"InsurUnemploy"], nrow(var$y)-10)
+
+mape1 = mean(abs((r1/y1)))*100
+mape2 = mean(abs((r2/y2)))*100
+
+cat("MAPE1 =", mape1, "\n", "MAPE2 =", mape2)
+```
+
+```{r}
+autofit = auto.arima(series[,"InsurUnemploy"], seasonal = TRUE)
+
+summary(autofit)
+```
+
+
+## __________FORECASTING: EXOGENEOUS_________
+
+Forecasting exogeneous regressor
+```{r}
+exomod1 = auto.arima(ts(ext[,1], start = c(2013,40), frequency = 52))
+exomod2 = auto.arima(ts(ext[,2], start = c(2013,40), frequency = 52))
+summary(exomod1)
+summary(exomod2)
+```
+
+```{r}
+rx1 = residuals(exomod1)
+
+par(mfrow=c(1,2))
+acf(rx1)
+pacf(rx1)
+
+rx2 = residuals(exomod2)
+
+par(mfrow=c(1,2))
+acf(rx2)
+pacf(rx2)
+
+qqPlot(rx1, id = F)
+qqPlot(rx2, id = F)
+```
+
+```{r}
+#Forecast depth
+depth = 26
+```
+
+```{r}
+extpred1 = forecast(exomod1, h = depth)
+extpred2 = forecast(exomod2, h = depth)
+extpred = as.matrix(cbind(PneuDeath = extpred1$mean, 
+                          FluDeath = extpred2$mean))
+
+plot(extpred1, main = "PneuDeath Prediction")
+plot(extpred2, main = "FluDeath Prediction")
+```
+
+Using the latest values (holding situation the same)
+```{r}
+extsame = as.matrix(cbind(PneuDeath = rep(ext[,1][nrow(ext)], depth), 
+                          FluDeath = rep(ext[,2][nrow(ext)], depth)))
+```
+
+```{r}
+plot(ext[,c(1,2)])
+```
+
+Using the worst value in the past 3 months (holding situation the same)
+```{r}
+n = nrow(ext)
+worst1 = max(ext[c((n-11):n),1])
+worst2 = max(ext[c((n-11):n),2])
+
+extworst = as.matrix(cbind(PneuDeath = rep(worst1, depth), 
+                          FluDeath = rep(worst2, depth)))
+```
+
+```{r}
+worst1
+worst2
+```
+
+```{r}
+data[data$`Percent of Deaths due to Pneumonia` == worst1,1:2]
+data[data$`Percent of Deaths due to Influenza` == worst2,1:2]
+```
+
+
+
+## __________FORECASTING: ENDOGENEOUS_________
+
+```{r}
+fore_pred = predict(var, dumvar = extpred, n.ahead = depth)
+fore_same = predict(var, dumvar = extsame, n.ahead = depth)
+fore_worst = predict(var, dumvar = extworst, n.ahead = depth)
+```
+
+Black line: 2020 week 1 to 2020 week 22
+
+png("VAR - 26-Week Ahead Forecast for Insured Unemployment Rate.png", units="in", width=7, height=5, res=1080)
+dev.off()
+```{r}
+lwd = 1.5; PIlty = "dotted"; past = 22
+existing = tail(c(series[,"InsurUnemploy"],fore_same$fcst$InsurUnemploy[,"fcst"][1]), n=past)
+n = length(existing) + 1
+
+plot(as.vector(existing), type = "l", ylim = c(0,30), xlim = c(0,past+depth),
+     ylab = "Insured Unemployment Rate (%)", xlab = "Weeks", lwd = lwd, col = "BLACK", axes = F,
+     main = "26-Week Ahead Forecasts of Insured Unemployment Rate")
+
+horizontal = seq(0,30, by = 5); vertical = seq(0,past+depth, by = (past+depth)/6)
+abline(h = horizontal, v = vertical, col = "GREY", lty = "dotted")
+axis(side = 2, at = horizontal)
+axis(side = 1, at = vertical, labels = F)
+text(x=vertical,  par("usr")[3], 
+     labels = c("2020-W1", "2020-W9", "2020-W17", "2020-W25", 
+                "2020-W33", "2020-W41", "2020-W49"), 
+     srt = 0, pos = 1, xpd = T, cex = 0.75, offset = 1)
+
+lines(x = n:(n+depth-1), y=fore_same$fcst$InsurUnemploy[,"fcst"], col = "DARKBLUE", lwd = lwd)     
+lines(x = n:(n+depth-1), y=fore_same$fcst$InsurUnemploy[,"upper"], lty = PIlty, col = "BLUE", lwd = lwd)
+lines(x = n:(n+depth-1), y=fore_same$fcst$InsurUnemploy[,"lower"], lty = PIlty, col = "BLUE", lwd = lwd)
+
+lines(x = n:(n+depth-1), y=fore_worst$fcst$InsurUnemploy[,"fcst"], col = "DARKRED", lwd = lwd)
+lines(x = n:(n+depth-1), y=fore_worst$fcst$InsurUnemploy[,"upper"], lty = PIlty, col = "RED", lwd = lwd)
+lines(x = n:(n+depth-1), y=fore_worst$fcst$InsurUnemploy[,"lower"], lty = PIlty, col = "RED", lwd = lwd)
+
+#lines(x = n:(n+depth-1), y=fore_pred$fcst$InsurUnemploy[,"fcst"], col = "DARKGREEN", lwd = lwd)
+#lines(x = n:(n+depth-1), y=fore_pred$fcst$InsurUnemploy[,"upper"], lty = PIlty, col = "GREEN", lwd = lwd)
+#lines(x = n:(n+depth-1), y=fore_pred$fcst$InsurUnemploy[,"lower"], lty = PIlty, col = "GREEN", lwd = lwd)
+
+legend(x = 0, y = 30, c("Worst-case", "Unchanged"), col = c("DARKRED", "DARKBLUE"), lty = c(1,1), lwd = 2,
+       bg = "WHITE", title = "Forecasts", text.font=2, cex = 0.85)
+```
