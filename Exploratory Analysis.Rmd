@@ -1,6 +1,6 @@
 ---
 title: "Exploratory Analysis"
-output: html_document
+output: rmarkdown::github_document
 ---
 
 ## __________PREPARATION__________
