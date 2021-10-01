@@ -1,5 +1,6 @@
 ---
 title: "Generalized Linear Mixed Model"
+author: "Jia Yi Ong"
 output: rmarkdown::github_document
 ---
 
