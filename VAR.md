@@ -1,6 +1,8 @@
 Vector Autoregression
 ================
 
+Jia Yi Ong
+
 ## \_\_\_\_\_\_\_\_\_\_PREPARATION\_\_\_\_\_\_\_\_\_\_
 
 ``` r
