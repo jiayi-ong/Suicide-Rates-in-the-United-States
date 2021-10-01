@@ -1,6 +1,8 @@
 Exploratory Analysis
 ================
 
+Jia Yi Ong
+
 ## \_\_\_\_\_\_\_\_\_\_PREPARATION\_\_\_\_\_\_\_\_\_\_
 
 ### Data subsetting and cleaning
