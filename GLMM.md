@@ -1,6 +1,8 @@
 Generalized Linear Mixed Model
 ================
 
+Jia Yi Ong
+
 ### Resources
 
 -   <https://mran.microsoft.com/snapshot/2017-04-22/web/packages/sjPlot/vignettes/sjplmer.html>
